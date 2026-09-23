@@ -1,0 +1,23 @@
+name: tests
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Safety tests
+        run: python -m unittest discover -s tests -v
+      - name: Shell syntax
+        run: for f in install.sh uninstall.sh executor/install-executor.sh bin/guardian-passwd; do bash -n "$f"; done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: JavaScript syntax
+        run: for f in guardian/static/*.js; do node --check "$f"; done

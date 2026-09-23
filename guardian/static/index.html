@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Guardian</title>
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/theme.js"></script>
+</head>
+<body>
+<aside class="side" id="side"></aside>
+<div class="shell">
+  <header class="top">
+    <div class="crumb" id="crumb">Home</div>
+    <div class="grow"></div>
+    <button class="tbtn" id="theme" title="Toggle light/dark" aria-label="Toggle light/dark theme"></button>
+    <select class="tsel" id="range" aria-label="Time range" title="Time range">
+      <option value="15m">Last 15 minutes</option><option value="1h" selected>Last 1 hour</option>
+      <option value="6h">Last 6 hours</option><option value="24h">Last 24 hours</option>
+      <option value="7d">Last 7 days</option><option value="30d">Last 30 days</option>
+    </select>
+    <div class="group">
+      <button class="tbtn" id="refresh" title="Refresh now" aria-label="Refresh now"><span class="live-dot" id="dot"></span></button>
+      <select class="tsel" id="every" aria-label="Auto refresh" title="Auto refresh">
+        <option value="0">Off</option><option value="15" selected>15s</option><option value="30">30s</option>
+        <option value="60">1m</option><option value="300">5m</option>
+      </select>
+    </div>
+  </header>
+  <div class="vars" id="vars"></div>
+  <main id="main"><div class="empty">Loading…</div></main>
+</div>
+
+<dialog id="action">
+  <h2 id="a-title"></h2>
+  <div id="a-body"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+    <button id="a-cancel" class="btn" type="button">Cancel</button>
+    <button id="a-go" class="btn primary" type="button">Confirm</button>
+  </div>
+</dialog>
+<script src="/static/app.js"></script>
+</body>
+</html>

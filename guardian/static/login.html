@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian login</title>
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/theme.js"></script>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login">
+    <img class="logo" src="/static/logo.svg" alt="">
+    <h1>Guardian</h1>
+    <div class="muted">Ubuntu &amp; Immich server monitor</div>
+    <form id="f" class="p">
+      <label for="pw" class="muted">Password</label>
+      <input class="in" type="password" id="pw" autocomplete="current-password" autofocus>
+      <button class="btn primary" type="submit">Log in</button>
+      <p id="err" style="color:var(--red);min-height:1em;margin:10px 0 0"></p>
+      <p class="muted small" style="margin:6px 0 0">Forgot it? On the server run <span class="mono">bin/guardian-passwd</span> in the Guardian folder.</p>
+    </form>
+  </div>
+</div>
+<script src="/static/login.js"></script>
+</body>
+</html>

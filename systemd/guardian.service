@@ -1,0 +1,25 @@
+[Unit]
+Description=Guardian: laptop and Immich server monitor
+Documentation=https://github.com/manojbarot1/ubuntu-guardian
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=@INSTALL_DIR@
+Environment=PYTHONPATH=@INSTALL_DIR@/.vendor:@INSTALL_DIR@
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m guardian
+Restart=on-failure
+RestartSec=10
+
+# Guardian must never become the problem it is watching for.
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=25%
+CPUWeight=20
+MemoryHigh=300M
+MemoryMax=400M
+TasksMax=64
+
+[Install]
+WantedBy=default.target

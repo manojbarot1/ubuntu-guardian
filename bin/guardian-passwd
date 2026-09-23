@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Set the Guardian dashboard password from the terminal (and clear any login lockout).
+set -euo pipefail
+dir="$(cd -- "$(dirname -- "$0")/.." && pwd)"
+PYTHONPATH="$dir/.vendor:$dir" python3 - <<'PY'
+import getpass, sys
+from guardian import auth
+pw = getpass.getpass("New dashboard password (10+ characters): ")
+if pw != getpass.getpass("Repeat: "):
+    sys.exit("Passwords do not match.")
+try:
+    auth.Auth().set_password(pw.strip())
+except ValueError as e:
+    sys.exit(str(e))
+auth.INITIAL_PW_FILE.unlink(missing_ok=True)
+print("Password set.")
+PY
+systemctl --user restart guardian.service
+echo "Guardian restarted. Log in at http://$(hostname -I | awk '{print $1}'):8770"

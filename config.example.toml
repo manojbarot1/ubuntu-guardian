@@ -1,0 +1,70 @@
+# Guardian configuration. Copy to ~/.config/guardian/config.toml and uncomment what you want to change.
+# Anything left out uses the built-in default (see guardian/config.py). Apply with:
+#   systemctl --user restart guardian
+
+# [server]
+# port = 8770
+# allowed_networks = ["127.0.0.0/8", "::1/128", "192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
+
+# [intervals]                     # seconds between collector runs
+# system = 15                     # CPU, memory, disk/network rates, TCP states (light)
+# containers = 30                 # per-container CPU/RAM/network/disk (light)
+# processes = 60
+# services = 300                  # heavy: waits while the system is busy
+# storage = 600
+# smart = 3600
+# dir_sizes = 86400               # daily walk of Immich folders at a 10% duty cycle
+# checks = 120
+
+# [security]
+# audit_interval = 21600          # full security review every 6 h
+# image_scan_days = 7             # weekly Trivy re-scan after your first manual scan (0 = never re-scan automatically)
+# trivy_image = "aquasec/trivy:latest"
+# trivy_cpus = 1
+# trivy_memory = "1g"
+
+# [governor]                      # when the system counts as busy (heavy checks wait, scans pause)
+# busy_load_per_cpu = 0.85
+# busy_cpu_percent = 85
+# busy_mem_available_percent = 8
+# busy_io_pressure = 20
+# self_cpu_budget_percent = 3     # warn if Guardian itself averages more than this
+
+# [retention]
+# raw_hours = 48                  # 15-second samples
+# hourly_days = 365               # hourly roll-ups
+
+# [immich]
+# app_dir = "/home/you/immich-app"
+# url = "http://127.0.0.1:2283"
+# api_key = ""                    # admin API key: enables job-queue awareness
+
+# Optional: watch an existing backup job. Guardian does not include one; any job can be monitored if it is a
+# systemd --user unit and/or writes a small JSON status file. Off unless unit or drive_uuid is set.
+# [backup]
+# unit = "photo-backup"           # enables "Run backup now" and shows the next scheduled run of photo-backup.timer
+# drive_uuid = "ABCD-1234"        # backup drive (lsblk -f): alerts when unplugged or running out of space
+# status_file = "/home/you/.local/state/guardian/backup-status.json"
+#                                 # {"result": "ok|warning|failed", "message": "...", "finished": "<ISO 8601>", "target": "<path>"}
+# log_file = "/home/you/.local/state/guardian/backup.log"   # shown on the Storage dashboard
+# max_age_days = 8                # older than this = critical recommendation
+
+# [protection]                    # lists here REPLACE the defaults: copy the full default list and add to it
+# protected_paths = ["/home/you/immich-app", "/var/lib/docker", "/var/lib/containerd", "/etc", "/boot", "/usr",
+#                    "/var/lib/postgresql", "/home/you/Important"]
+# protected_units = ["docker.service", "containerd.service", "ssh.service", "systemd-*"]
+
+# [duplicates]
+# default_roots = ["/home/you/Downloads", "/home/you/Documents", "/home/you/Pictures"]
+# min_size_bytes = 1048576
+# read_rate_mb_s = 40
+
+# Endpoint health checks (status panels). Replaces the default list.
+# [[checks]]
+# name = "Immich API"
+# url = "http://127.0.0.1:2283/api/server/ping"
+# expect = [200]
+# [[checks]]
+# name = "Router"
+# url = "http://192.168.1.1/"
+# expect = [200, 301, 302]

@@ -1,0 +1,61 @@
+#!/usr/bin/python3
+"""Guardian root helper. Socket-activated (one process per request, nothing runs while idle).
+
+Reads ONE JSON line from stdin: {"verb": "...", "unit": "....service"}
+Writes ONE JSON line to stdout with before/after state.
+
+It can only run `systemctl <start|stop|restart|enable|disable> -- <unit>` for loaded .service units
+that are not on its own deny list. No shell, no arbitrary arguments, no other commands.
+This file is installed root-owned under /usr/local/lib/guardian so the dashboard user cannot edit it.
+"""
+import fnmatch
+import json
+import re
+import subprocess
+import sys
+import syslog
+
+VERBS = {"start", "stop", "restart", "enable", "disable"}
+UNIT_RE = re.compile(r"^[A-Za-z0-9@_.:\\-]{1,200}\.service$")
+# Independent of the dashboard's config on purpose: defense in depth.
+DENY = [
+    "systemd-*", "dbus*.service", "docker.service", "containerd.service", "NetworkManager*.service",
+    "wpa_supplicant*.service", "polkit.service", "udisks2.service", "gdm*.service", "display-manager.service",
+    "user@*.service", "user-runtime-dir@*.service", "getty@*.service", "ssh.service", "sshd.service",
+    "apparmor.service", "guardian-exec@*.service", "dbus-broker.service", "networkd-dispatcher.service",
+    "cron.service", "unattended-upgrades.service", "ufw.service", "emergency.service", "rescue.service",
+]
+
+
+def state(unit):
+    out = subprocess.run(["systemctl", "show", "-p", "ActiveState,SubState,UnitFileState,LoadState", "--", unit],
+                         capture_output=True, text=True, timeout=30).stdout
+    return dict(l.split("=", 1) for l in out.splitlines() if "=" in l)
+
+
+def reply(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+
+def main():
+    try:
+        req = json.loads(sys.stdin.readline(4096))
+        verb, unit = req.get("verb"), req.get("unit")
+    except Exception:
+        return reply({"ok": False, "error": "bad request"})
+    if verb not in VERBS or not isinstance(unit, str) or not UNIT_RE.match(unit):
+        return reply({"ok": False, "error": "verb or unit not allowed"})
+    if any(fnmatch.fnmatch(unit, p) for p in DENY):
+        return reply({"ok": False, "error": f"{unit} is protected"})
+    before = state(unit)
+    if before.get("LoadState") != "loaded":
+        return reply({"ok": False, "error": f"{unit} is not a loaded unit"})
+    p = subprocess.run(["systemctl", verb, "--", unit], capture_output=True, text=True, timeout=90)
+    after = state(unit)
+    syslog.syslog(syslog.LOG_NOTICE, f"guardian-exec: {verb} {unit} rc={p.returncode}")
+    reply({"ok": p.returncode == 0, "rc": p.returncode, "stderr": p.stderr[-2000:], "before": before, "after": after})
+
+
+if __name__ == "__main__":
+    main()
