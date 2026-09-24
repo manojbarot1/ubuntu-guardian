@@ -18,12 +18,13 @@ from .collectors import Collectors
 from .db import DB
 from .duplicates import Scanner
 from .governor import Governor
+from .memwatch import MemWatch
 
 log = logging.getLogger("guardian")
 
 # name -> heavy? Heavy tasks wait while the system is busy.
 TASKS = {
-    "system": False, "containers": False, "processes": False, "immich": False, "rules": False, "checks": False,
+    "system": False, "hardware": False, "containers": False, "processes": False, "immich": False, "rules": False, "checks": False,
     "services": True, "docker_inventory": True, "network": True, "storage": True, "smart": True,
     "dir_sizes": True, "inventory": True, "rollup": True, "security": True, "image_scan": True,
 }
@@ -120,6 +121,7 @@ class Context:
     actions: Actions = field(default=None)
     scanner: Scanner = field(default=None)
     image_scanner: object = field(default=None)
+    memwatch: MemWatch | None = field(default=None)
     security_refreshing: bool = False
 
 
@@ -136,6 +138,9 @@ def main() -> None:
     ctx.image_scanner = security.ImageScanner(cfg, db, gov)
     ctx.scheduler.image_scanner = ctx.image_scanner
     ctx.scheduler.start()
+    if cfg["memory"]["enabled"]:
+        ctx.memwatch = MemWatch(cfg, db)
+        ctx.memwatch.start()
     db.log("guardian", "info", "started")
     uvicorn.run(create_app(ctx), host=cfg["server"]["host"], port=cfg["server"]["port"], log_level="warning",
                 access_log=False, http="h11", loop="asyncio", workers=1, proxy_headers=False)

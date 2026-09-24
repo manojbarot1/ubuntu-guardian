@@ -45,13 +45,15 @@ It is designed to **never become the problem it watches for**: about 0.5% of one
 | | |
 |---|---|
 | **Monitoring** | CPU (total and per core, user/system/iowait), load, memory, swap, pressure stall (PSI), disk and network I/O, TCP connection states, processes, threads, zombies, uptime |
+| **Memory watch** | Live RAM monitor sampled every second: what's in RAM (apps, cache, free), RAM in/out (pages allocated and freed per second), disk and swap paging, page faults, memory pressure; per-program and per-process memory with 1- and 10-minute change; events when big processes start or exit, jump by hundreds of MB, grow steadily like a leak, or when memory runs low, swap storms or the OOM killer fires |
+| **Power & thermals** | Battery charge, health (capacity vs. design), charge cycles, power draw and time left, charge limit; CPU and all sensor temperatures, fan speed, CPU speed and thermal throttling. Suggests an 80% charge limit on an always-plugged-in laptop (commands to copy), warns when running on battery, hot or throttling, or when the fan stops; heavy work pauses on battery or above 90 °C |
 | **Docker** | Per-container CPU, memory, page cache, network in/out and disk writes read straight from cgroups (much cheaper than `docker stats`); images, volumes, mounts, compose projects |
 | **Immich** | Health, version, busy/idle, library size by folder, Immich's own daily database dumps, protected paths, optional job-queue awareness via API key |
 | **Security review** | Patch state, automatic updates, reboot needed, exposed ports and firewall, SSH settings, failed logins, file permissions of secrets, risky containers (privileged, Docker socket), CPU vulnerabilities, kernel hardening, Immich version; a 0–100 score with fixes to copy |
 | **Vulnerability scanning** | CVE scan of every running container image with [Trivy](https://trivy.dev), on demand and weekly, CPU- and memory-limited |
 | **Storage** | Usage and inode gauges, 30-day history, growth rate and "full in N days", SMART health and temperature (NVMe, SATA and most USB drives, no root needed) |
 | **Service intelligence** | What each systemd service is, why it runs, what depends on it, what breaks if you stop or disable it, confidence level |
-| **Recommendations** | Deterministic rules with evidence: full disks, failing drives, memory pressure, exposed ports, crash-looping containers, optional services, security failures |
+| **Recommendations** | Deterministic rules with evidence: full disks, failing drives, memory pressure, memory leaks, battery wear and charge limit, running on battery, heat and throttling, exposed ports, crash-looping containers, optional services, security failures |
 | **Controlled actions** | Start/stop/restart/enable/disable services, start/stop/restart containers, quarantine duplicate files. Every action needs preview → confirm → re-check → audit |
 | **Duplicate finder** | Exact duplicates only (size + SHA-256); protected folders are never scanned; quarantine before delete; restore any time |
 | **Dashboard** | Grafana-style dark/light UI with gauges, trend lines, time-range and refresh pickers, collapsible rows, hover tooltips; works on phones |
@@ -145,6 +147,8 @@ api_key = "paste-key-here"
 | Dashboard | What you see |
 |---|---|
 | **Server** | Uptime, CPU/RAM/swap gauges, load, IOWait, users, zombies, processes, threads, network connections, download/upload; disk and inode gauges; endpoint checks, Immich, drive temperatures; per-CPU charts; I/O and network charts; top processes |
+| **Memory** | Live (2-second refresh, 1-second samples for the last hour): status line, used/available/cache/swap/pressure, RAM in/out, page faults, disk ↔ RAM; what the watcher noticed; stacked "what's in RAM" chart; in/out, paging, faults and PSI charts; programs and processes with growth and possible-leak tags |
+| **Power & thermals** | Power source, battery charge and health gauges, power draw, cycles, charge limit; CPU temperature, hottest sensor, fan, throttling, CPU speed, power profile; history charts; daily battery-health trend; every sensor |
 | **Docker** | CPU/memory/storage load, running containers over time, per-container CPU, memory, cache, network in/out and disk writes; containers table with start/stop/restart; images and volumes |
 | **Immich** | Online/idle, originals/video/thumbnail sizes, container resource charts, Immich's own DB dumps, protected paths |
 | **Storage** | Usage and inodes, growth per day, 30-day history, disk I/O, SMART, disks and partitions |
@@ -182,13 +186,14 @@ The image scan runs `aquasec/trivy` in a throwaway container with `--cpus 1 --me
 | Mechanism | Detail |
 |---|---|
 | Cheap sources | `/proc`, cgroup files and `/proc/net/tcp` instead of spawning tools; the 15-second collector takes ~4 ms |
-| Load governor | Heavy work (services, SMART, Docker inventory, folder sizes, security review, image scans) waits while load > 0.85/CPU, CPU > 85%, RAM free < 8%, I/O pressure > 20%, or Immich is processing (up to 6× its interval, so data never goes stale) |
+| Load governor | Heavy work (services, SMART, Docker inventory, folder sizes, security review, image scans) waits while load > 0.85/CPU, CPU > 85%, RAM free < 8%, I/O pressure > 20%, or Immich is processing, the laptop is on battery, or the CPU is above 90 °C (up to 6× its interval, so data never goes stale) |
+| Memory watch | Its own small thread, so heavy tasks never stall it: 3 small `/proc` reads per second (~0.2 ms); the per-process scan runs every 10 s, or early when memory moves by 64 MB; ~0.3% of one core in total. Top lists are built only when the Memory page asks |
 | Duty cycle | The daily walk of the Immich library sleeps 9× as long as it works (~10% of one core) and never runs at startup |
 | Throttled scans | Duplicate hashing reads at most 40 MB/s; Trivy is limited to 1 CPU and 1 GB |
 | Hard limits | `CPUQuota=25%`, `MemoryMax=400M`, `Nice=10`, `IOSchedulingClass=idle` |
 | Fast API | Metrics are pre-aggregated in SQLite and serialized directly; a dashboard refresh costs ~80 ms |
 | Self-monitoring | Guardian measures its own CPU from its cgroup and raises a recommendation if it averages > 3% of a core |
-| Retention | 15-second samples for 48 h, hourly roll-ups for a year: the database stays small |
+| Retention | 15-second samples for 48 h, hourly roll-ups for a year, memory-watch 10-second averages for 7 days: the database stays small |
 
 ## Safety model
 
@@ -304,6 +309,8 @@ systemctl --user restart guardian
 flowchart LR
   subgraph host[Ubuntu host]
     C[Collectors<br/>/proc, cgroups, systemd,<br/>Docker API GET, udisks] --> DB[(SQLite)]
+    M[Memory watch<br/>1 s /proc sampler] --> DB
+    H[Power & thermals<br/>sysfs: battery, hwmon] --> DB
     S[Security review<br/>apt, sshd, sysctl, ports] --> DB
     T[Trivy container<br/>1 CPU, 1 GB] --> DB
     G[Load governor] -. defers heavy work .-> C & S & T
@@ -321,6 +328,8 @@ flowchart LR
 | `guardian/collectors.py` | Read-only discovery and metrics |
 | `guardian/security.py` | Security review and Trivy image scans |
 | `guardian/governor.py` | Busy detection, self-measurement |
+| `guardian/memwatch.py` | Continuous memory watch (own thread) and its events |
+| `guardian/hardware.py` | Battery, power, temperature, fan and throttling readers (sysfs) |
 | `guardian/rules.py` | Recommendations |
 | `guardian/intel.py`, `services_kb.py` | Service explanations |
 | `guardian/actions.py` | Preview/confirm/execute/audit |
@@ -329,7 +338,7 @@ flowchart LR
 | `guardian/static/` | Dashboard (vanilla JS, no build step) |
 | `executor/` | Optional root helper |
 | `systemd/` | Unit template (installed by `install.sh`) |
-| `tests/` | Safety tests (run in CI) |
+| `tests/` | Safety, memory-watch and hardware tests (run in CI) |
 
 ### Roadmap
 

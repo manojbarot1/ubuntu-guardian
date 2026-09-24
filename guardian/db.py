@@ -72,6 +72,29 @@ CREATE TABLE IF NOT EXISTS core_samples (
 CREATE TABLE IF NOT EXISTS proc_samples (
   ts INTEGER PRIMARY KEY, procs INTEGER, running INTEGER, threads INTEGER, zombies INTEGER, users INTEGER
 );
+-- Memory watch: 10 s averages (the last hour at 1 s lives in memory) and the events it raised.
+CREATE TABLE IF NOT EXISTS mem_samples (
+  ts INTEGER PRIMARY KEY,
+  total REAL, used REAL, cache REAL, free REAL, avail REAL, anon REAL, shmem REAL, slab REAL, dirty REAL,
+  swap_total REAL, swap_used REAL, alloc REAL, freed REAL, page_in REAL, page_out REAL, swap_in REAL, swap_out REAL,
+  faults REAL, major_faults REAL, psi_some REAL, psi_full REAL
+);
+CREATE TABLE IF NOT EXISTS mem_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, level TEXT, kind TEXT, message TEXT, pid INTEGER, name TEXT, delta REAL
+);
+CREATE INDEX IF NOT EXISTS mem_events_ts ON mem_events (ts);
+-- Battery, power and thermals: 15 s samples (raw_hours), hourly roll-ups (hourly_days), one health row per day.
+CREATE TABLE IF NOT EXISTS hw_samples (
+  ts INTEGER PRIMARY KEY, cpu_temp REAL, max_temp REAL, fan_rpm REAL, bat_pct REAL, bat_watts REAL,
+  on_battery INTEGER, throttle_pct REAL, freq_mhz REAL
+);
+CREATE TABLE IF NOT EXISTS hw_hourly (
+  ts INTEGER PRIMARY KEY, cpu_temp REAL, cpu_temp_max REAL, max_temp REAL, fan_rpm REAL, bat_pct REAL, bat_watts REAL,
+  on_battery REAL, throttle_pct REAL, freq_mhz REAL
+);
+CREATE TABLE IF NOT EXISTS battery_health (
+  ts INTEGER, name TEXT, full_wh REAL, design_wh REAL, cycles INTEGER, PRIMARY KEY (ts, name)
+);
 CREATE TABLE IF NOT EXISTS check_samples (
   ts INTEGER, name TEXT, ok INTEGER, code INTEGER, ms REAL, PRIMARY KEY (ts, name)
 );

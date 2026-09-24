@@ -14,6 +14,7 @@ from pathlib import Path
 import psutil
 
 from . import config as C
+from . import hardware as HW
 from .util import docker_api, read, run, run_json
 
 CGROUP = "/sys/fs/cgroup"
@@ -32,6 +33,9 @@ class Collectors:
         self._ctr_cpu: dict[str, tuple[float, float]] = {}
         self._svc_cpu: dict[str, tuple[float, float]] = {}
         self._ctr_io: dict[str, tuple] = {}
+        self._thr: tuple[float, float] | None = None
+        self._hw_runs = 0
+        self._slow_sensors: tuple[list, list] = ([], [])
         psutil.cpu_percent(None)
         psutil.cpu_percent(None, percpu=True)
         psutil.cpu_times_percent(None)
@@ -82,6 +86,38 @@ class Collectors:
             "self": {"cpu": self_cpu, "rss": self_rss, "started": self.gov.me.create_time()}, "busy": busy, "busy_reason": self.gov.reason,
             "uptime": now - psutil.boot_time(),
         })
+
+    def hardware(self) -> None:
+        """Battery, power source, temperatures, fans and thermal throttling (sysfs only)."""
+        now = time.time()
+        # Embedded-controller sensors (fan, board temperatures) every 4th run; CPU registers every run.
+        full = self._hw_runs % 4 == 0
+        self._hw_runs += 1
+        h = HW.read_all(fast_only=not full)
+        if full:
+            self._slow_sensors = ([t for t in h["temps"] if t["chip"] not in HW.FAST_CHIPS], h["fans"])
+        else:
+            h["temps"] += self._slow_sensors[0]
+            h["fans"] = self._slow_sensors[1]
+            h["cpu_temp"] = HW.cpu_temp(h["temps"])
+        ms = h["throttle"]["ms"]
+        prev, self._thr = self._thr, (now, ms)
+        h["throttle_pct"] = max(ms - prev[1], 0) / ((now - prev[0]) * 10) if prev and now > prev[0] else 0.0
+        self.gov.update_hardware(h["on_battery"], h["cpu_temp"])
+        b = h["batteries"][0] if h["batteries"] else None
+        watts = None
+        if b:   # signed: + charging, - discharging
+            watts = -b["watts"] if b["status"] == "Discharging" else b["watts"] if b["status"] == "Charging" else 0.0
+        self.db.insert("hw_samples", dict(
+            ts=int(now), cpu_temp=h["cpu_temp"], max_temp=max((t["c"] for t in h["temps"]), default=None),
+            fan_rpm=max((f["rpm"] for f in h["fans"]), default=None), bat_pct=b["percent"] if b else None,
+            bat_watts=watts, on_battery=int(h["on_battery"]), throttle_pct=h["throttle_pct"], freq_mhz=h["freq_mhz"]))
+        day = int(now) - int(now) % 86400
+        for bat in h["batteries"]:
+            if bat["design_wh"]:
+                self.db.execute("INSERT OR IGNORE INTO battery_health VALUES (?,?,?,?,?)",
+                                (day, bat["name"], bat["full_wh"], bat["design_wh"], bat["cycles"]))
+        self.db.put_snapshot("hardware", h)
 
     def processes(self) -> None:
         now = time.time()
@@ -496,9 +532,17 @@ class Collectors:
             SELECT ts - ts % 3600, AVG(cpu), MAX(cpu), AVG(load1), AVG(mem_used), AVG(swap_used),
                    AVG(disk_read_bps), AVG(disk_write_bps), AVG(net_rx_bps), AVG(net_tx_bps), AVG(self_cpu), AVG(iowait)
             FROM samples WHERE ts >= ? AND ts < ? GROUP BY ts - ts % 3600""", (last, hour))
+        last = self.db.one("SELECT MAX(ts) AS t FROM hw_hourly")["t"] or 0
+        self.db.execute("""
+            INSERT OR REPLACE INTO hw_hourly
+            (ts, cpu_temp, cpu_temp_max, max_temp, fan_rpm, bat_pct, bat_watts, on_battery, throttle_pct, freq_mhz)
+            SELECT ts - ts % 3600, AVG(cpu_temp), MAX(cpu_temp), MAX(max_temp), AVG(fan_rpm), AVG(bat_pct), AVG(bat_watts),
+                   AVG(on_battery), AVG(throttle_pct), AVG(freq_mhz)
+            FROM hw_samples WHERE ts >= ? AND ts < ? GROUP BY ts - ts % 3600""", (last, hour))
         r = self.cfg["retention"]
         self.db.execute("DELETE FROM samples WHERE ts < ?", (now - r["raw_hours"] * 3600,))
-        for t in ("container_samples", "core_samples", "proc_samples"):
+        self.db.execute("DELETE FROM hw_hourly WHERE ts < ?", (now - r["hourly_days"] * 86400,))
+        for t in ("container_samples", "core_samples", "proc_samples", "hw_samples"):
             self.db.execute(f"DELETE FROM {t} WHERE ts < ?", (now - r["raw_hours"] * 3600,))
         self.db.execute("DELETE FROM check_samples WHERE ts < ?", (now - 7 * 86400,))
         self.db.execute("DELETE FROM samples_hourly WHERE ts < ?", (now - r["hourly_days"] * 86400,))

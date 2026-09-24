@@ -31,6 +31,8 @@ class Governor:
         self.ncpu = os.cpu_count() or 1
         self.last_cpu = 0.0
         self.immich_busy = False
+        self.on_battery = False
+        self.cpu_temp: float | None = None
         self.reason = ""
         self.lock = threading.Lock()
         self.me = psutil.Process()
@@ -42,6 +44,9 @@ class Governor:
 
     def update_cpu(self, cpu_percent: float) -> None:
         self.last_cpu = cpu_percent
+
+    def update_hardware(self, on_battery: bool, cpu_temp: float | None) -> None:
+        self.on_battery, self.cpu_temp = on_battery, cpu_temp
 
     def busy(self) -> bool:
         load1 = os.getloadavg()[0] / self.ncpu
@@ -57,6 +62,10 @@ class Governor:
             reasons.append("io pressure")
         if self.immich_busy:
             reasons.append("immich processing")
+        if self.on_battery and self.g.get("busy_on_battery", True):
+            reasons.append("on battery")
+        if self.cpu_temp and self.cpu_temp >= self.g.get("busy_cpu_temp", 90):
+            reasons.append(f"cpu {self.cpu_temp:.0f}°C")
         self.reason = ", ".join(reasons)
         return bool(reasons)
 

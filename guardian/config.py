@@ -22,6 +22,7 @@ DEFAULTS: dict = {
     # Seconds between runs. Heavy collectors are deferred while the system is busy.
     "intervals": {
         "system": 15,
+        "hardware": 15,               # battery, temperatures, fans, thermal throttling (sysfs, light)
         "processes": 60,
         "containers": 30,
         "services": 300,
@@ -54,11 +55,24 @@ DEFAULTS: dict = {
         "busy_cpu_percent": 85,
         "busy_mem_available_percent": 8,
         "busy_io_pressure": 20,
+        "busy_on_battery": True,        # heavy work waits while the charger is unplugged
+        "busy_cpu_temp": 90,            # ... or while the CPU is this hot (°C)
         "max_defer": 6,
         # Guardian's own budget: warn when it averages more than this share of one core.
         "self_cpu_budget_percent": 3,
     },
     "retention": {"raw_hours": 48, "hourly_days": 365},
+    # Continuous RAM monitoring (Memory dashboard). Runs on its own thread: ~3 small /proc reads per sample.
+    "memory": {
+        "enabled": True,
+        "sample_seconds": 1,          # system-wide counters (meminfo, vmstat, PSI)
+        "process_seconds": 10,        # per-process scan; also runs early when memory moves by 64 MB
+        "history_days": 7,            # 10-second history kept in the database
+        "big_process_mb": 150,        # note processes this big starting or exiting
+        "jump_mb": 200,               # note a process growing or shrinking this much within about a minute
+        "leak_min_growth_mb": 64,     # steady growth over 10 minutes needed to call it a possible leak
+        "low_available_percent": 12,
+    },
     "immich": {
         "app_dir": str(HOME / "immich-app"),
         "url": "http://127.0.0.1:2283",

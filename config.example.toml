@@ -8,6 +8,7 @@
 
 # [intervals]                     # seconds between collector runs
 # system = 15                     # CPU, memory, disk/network rates, TCP states (light)
+# hardware = 15                   # battery, temperatures, fans, thermal throttling (light)
 # containers = 30                 # per-container CPU/RAM/network/disk (light)
 # processes = 60
 # services = 300                  # heavy: waits while the system is busy
@@ -28,11 +29,23 @@
 # busy_cpu_percent = 85
 # busy_mem_available_percent = 8
 # busy_io_pressure = 20
+# busy_on_battery = true          # heavy work waits while the charger is unplugged
+# busy_cpu_temp = 90              # ... or while the CPU is this hot (°C)
 # self_cpu_budget_percent = 3     # warn if Guardian itself averages more than this
 
 # [retention]
 # raw_hours = 48                  # 15-second samples
 # hourly_days = 365               # hourly roll-ups
+
+# [memory]                        # continuous RAM monitoring (Memory dashboard)
+# enabled = true
+# sample_seconds = 1              # system-wide counters: meminfo, vmstat, PSI
+# process_seconds = 10            # per-process scan (runs early when memory moves by 64 MB)
+# history_days = 7
+# big_process_mb = 150            # note big processes starting/exiting
+# jump_mb = 200                   # note a process growing/shrinking this much within about a minute
+# leak_min_growth_mb = 64         # steady growth over 10 minutes = possible leak
+# low_available_percent = 12
 
 # [immich]
 # app_dir = "/home/you/immich-app"

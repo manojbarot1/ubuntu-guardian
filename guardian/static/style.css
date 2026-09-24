@@ -259,3 +259,4 @@ textarea.in { resize: vertical; font-family: var(--mono); font-size: 12px; margi
 .ann.pass .bar { background: var(--green); }
 .fix { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
 .fix code { flex: 1; min-width: 0; font: 11.5px/1.4 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; overflow-x: auto; white-space: nowrap; }
+.fix code.multi { white-space: pre; }

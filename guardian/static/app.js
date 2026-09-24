@@ -145,28 +145,33 @@ function timeseries(o) {
   const vis = o.series.filter((s) => !hidden.includes(s.name));
   const fmt = o.fmt || fix(1);
   if (t.length < 2 || !o.series.length) return panel(o.title, `<div class="empty">No data in this time range yet</div>`, { ...o, cls: "ts", h: o.h || 4 });
-  const all = vis.flatMap((s) => s.values).filter((v) => v != null);
+  // Stacked charts draw each series on top of the ones before it (tooltips and legends keep the raw values).
+  const bases = [], tops = [];
+  if (o.stack) vis.forEach((s, k) => { bases.push(k ? tops[k - 1] : t.map(() => 0)); tops.push(s.values.map((v, i) => bases[k][i] + (v || 0))); });
+  const all = (o.stack ? tops.slice(-1) : vis.map((s) => s.values)).flat().filter((v) => v != null);
   const lo = o.min ?? 0, hi = o.max ?? niceMax((all.length ? Math.max(...all) : 1) * 1.05);
   const t0 = t[0], t1 = t[t.length - 1], W = 1000, H = 300, gap = o.gap || (state.step || 15) * 3.5;
   const X = (x) => ((x - t0) / (t1 - t0 || 1)) * W;
   const Y = (v) => H - ((Math.min(Math.max(v, lo), hi) - lo) / (hi - lo || 1)) * H;
   let body = "";
   for (let k = 1; k < 4; k++) body += `<line class="gl" x1="0" x2="${W}" y1="${(H * k) / 4}" y2="${(H * k) / 4}" vector-effect="non-scaling-stroke"/>`;
-  vis.forEach((s) => {
+  vis.forEach((s, k) => {
+    const vals = o.stack ? tops[k].map((v, i) => (s.values[i] == null ? null : v)) : s.values;
     if (o.bars) {
       const bw = (W / t.length) * 0.75;
       s.values.forEach((v, i) => { if (v != null) body += `<rect x="${(X(t[i]) - bw / 2).toFixed(1)}" y="${Y(v).toFixed(1)}" width="${bw.toFixed(1)}" height="${(H - Y(v)).toFixed(1)}" fill="${s.color}" opacity=".75"/>`; });
       return;
     }
     const segs = []; let cur = null;
-    s.values.forEach((v, i) => {
+    vals.forEach((v, i) => {
       if (v == null || (cur && t[i] - t[i - 1] > gap)) { if (cur) segs.push(cur); cur = null; }
-      if (v != null) { cur = cur || []; cur.push([X(t[i]), Y(v)]); }
+      if (v != null) { cur = cur || []; cur.push([X(t[i]), Y(v), i]); }
     });
     if (cur) segs.push(cur);
     for (const sg of segs) {
       const d = sg.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join("");
-      if (o.fill !== false) body += `<path d="${d}L${sg[sg.length - 1][0].toFixed(1)},${H}L${sg[0][0].toFixed(1)},${H}Z" fill="${s.color}" opacity=".08"/>`;
+      if (o.stack) body += `<path d="${d}${sg.slice().reverse().map((p) => `L${p[0].toFixed(1)},${Y(bases[k][p[2]]).toFixed(1)}`).join("")}Z" fill="${s.color}" opacity=".35"/>`;
+      else if (o.fill !== false) body += `<path d="${d}L${sg[sg.length - 1][0].toFixed(1)},${H}L${sg[0][0].toFixed(1)},${H}Z" fill="${s.color}" opacity=".08"/>`;
       body += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
     }
   });
@@ -296,6 +301,8 @@ const state = {
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const NAV = [
   ["server", "Server", I('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>')],
+  ["memory", "Memory", I('<rect x="2" y="7" width="20" height="10" rx="1.5"/><path d="M6 11v2M10 11v2M14 11v2M18 11v2M5 17v3M9 17v3M15 17v3M19 17v3"/>')],
+  ["hardware", "Power & thermals", I('<path d="M14 4v10.5a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0z"/><path d="M12 9v7"/><path d="M19 3l-2 4h3l-2 4"/>')],
   ["docker", "Docker containers", I('<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="m3 7.5 9 4.5 9-4.5M12 12v9"/>')],
   ["immich", "Immich", I('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/>')],
   ["storage", "Storage", I('<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>')],
@@ -323,7 +330,7 @@ $("#theme").onclick = () => {
 };
 $("#range").value = state.range;
 $("#every").value = String(state.every);
-$("#range").onchange = (e) => { state.range = e.target.value; store.set("range", state.range); render(true); };
+$("#range").onchange = (e) => { state.range = e.target.value; store.set("range", state.range); state.mem = null; render(true); };
 $("#every").onchange = (e) => { state.every = +e.target.value; store.set("every", state.every); schedule(); };
 $("#refresh").onclick = () => render(true);
 
@@ -335,7 +342,7 @@ const checkValue = (c) => (c.ok ? String(c.code) : c.code ? String(c.code) : c.e
 D.server = {
   title: "Server stats", live: true,
   async render() {
-    const [o, m, pr, recs] = await Promise.all([api("/api/overview"), metrics(), api("/api/processes"), api("/api/recommendations")]);
+    const [o, m, pr, recs, hw] = await Promise.all([api("/api/overview"), metrics(), api("/api/processes"), api("/api/recommendations"), api("/api/hardware?range=1h")]);
     const L = o.live.data || {}, S = m.samples, t = colOf(S, "ts"), P = m.procs, pd = pr.data || {};
     const ncpu = L.ncpu || 1, load = L.load || [0, 0, 0];
     const rxMax = niceMax(Math.max(65536, ...colOf(S, "net_rx_bps").filter(Boolean)) * 1.1);
@@ -383,7 +390,11 @@ D.server = {
         const bad = d.failing || (d.warning || []).length;
         return stat({ title: d.model || "Drive", value: d.temp_c ? d.temp_c.toFixed(0) : (bad ? "FAIL" : "n/a"), unit: d.temp_c ? "°C" : "", raw: d.temp_c, th: TH.temp, color: bad ? "var(--red)" : d.temp_c ? undefined : "var(--muted)", span: 3, small: true, sub: bad ? "SMART failing" : d.temp_c ? "SMART healthy" : "no SMART data" });
       }).join("") +
+      (hw.snapshot.data?.cpu_temp != null ? stat({ title: "CPU temperature", value: hw.snapshot.data.cpu_temp.toFixed(0), unit: "°C", raw: hw.snapshot.data.cpu_temp, th: TH_TEMP, span: 3, small: true, spark: colOf(hw.samples, "cpu_temp"), sub: `<a href="#/hardware">power & thermals →</a>` }) : "") +
+      (hw.snapshot.data?.batteries?.length ? (() => { const bt = hw.snapshot.data.batteries[0], ob = hw.snapshot.data.on_battery;
+        return stat({ title: "Power", value: ob ? `Battery ${bt.percent}%` : "Plugged in", color: ob ? "var(--orange)" : "var(--green)", span: 3, small: true, sub: `battery health ${pct(bt.health, 0)}` }); })() : "") +
       stat({ title: "Guardian overhead", value: pct(L.self?.cpu), raw: L.self?.cpu, th: [[0, "green"], [3, "orange"], [10, "red"]], spark: colOf(S, "self_cpu"), span: 3, sub: `${bytes(L.self?.rss)} RAM · ${L.busy ? "system busy" : "system idle"}` });
+    const healthRow = fillLine(health);
     const annotations = panel("Recommendations", `<div class="scroll">${recs.map(annRow).join("") || '<div class="empty">Nothing needs attention</div>'}</div>`, { span: 12, h: 5, right: `<a href="#/alerts">all →</a>` });
     const topCpu = panel("Top processes (CPU, last minute)", `<div class="scroll">${procTable(pd.top_cpu || [])}</div>`, { span: 12, h: 5 });
 
@@ -393,7 +404,7 @@ D.server = {
     const loadTs = timeseries({ title: "Load average", t, fmt: fix(2), span: 12, series: [{ name: "load 1m", color: pal(2), values: colOf(S, "load1") }] });
     const psiTs = timeseries({ title: "Pressure stall (PSI)", t, fmt: (v) => pct(v, 2), span: 12, info: "Share of time tasks waited for CPU, memory or I/O", series: [
       { name: "cpu", color: pal(0), values: colOf(S, "psi_cpu") }, { name: "memory", color: pal(3), values: colOf(S, "psi_mem") }, { name: "io", color: pal(6), values: colOf(S, "psi_io") }] });
-    const memTs = timeseries({ title: "Memory", t, fmt: bytes, span: 12, series: [
+    const memTs = timeseries({ title: "Memory", t, fmt: bytes, span: 12, right: `<a href="#/memory">live detail →</a>`, series: [
       { name: "used", color: pal(1), values: colOf(S, "mem_used") }, { name: "swap used", color: pal(4), values: colOf(S, "swap_used") }] });
 
     let perCpu;
@@ -417,10 +428,182 @@ D.server = {
         ${(pd.apps || []).map((a) => `<tr><td>${esc(a.name)}</td><td class="n">${a.count}</td><td class="n">${a.cpu.toFixed(1)}%</td><td class="n">${bytes(a.rss)}</td></tr>`).join("")}</table></div>`, { span: 12, h: 5 });
 
     return R("general", `General - ${o.inventory?.hostname || "server"}`, general) + R("disks", "Disk usage", disks) +
-      R("health", "Health & alerts", health + annotations + topCpu) + R("cpu", "CPU & memory", cpuTs + loadTs + psiTs + memTs) +
+      R("health", "Health & alerts", healthRow + annotations + topCpu) + R("cpu", "CPU & memory", cpuTs + loadTs + psiTs + memTs) +
       R("percpu", "Per-CPU usage", perCpu) + R("io", "Disk & network I/O", io) + R("procs", "Processes", procs);
   },
 };
+// ------------------------------------------------------------------ memory (live, polled every 2 s)
+// The page keeps the samples it already has and only asks for newer ones, so a 1-hour view at
+// 1-second resolution costs a few hundred bytes per refresh.
+async function memData() {
+  const c = state.mem, now = Date.now() / 1000;
+  const inc = c && c.enabled && c.range === state.range && now - c.fetched < 60;
+  const q = inc ? `&since=${c.samples.length ? c.samples[c.samples.length - 1].ts : 0}&events_after=${c.events.length ? c.events[0].id : 0}` : "";
+  const r = await api(`/api/memory?range=${state.range}${q}`);
+  if (inc && r.enabled) {
+    const cut = now - r.seconds;
+    c.samples = c.samples.concat(r.samples).filter((x) => x.ts > cut);
+    c.events = r.events.concat(c.events).slice(0, 200);
+    Object.assign(c, { processes: r.processes, apps: r.apps, count: r.count, leaks: r.leaks, status: r.status, fetched: now });
+  } else state.mem = { ...r, fetched: now };
+  return state.mem;
+}
+// Average consecutive samples so a chart never draws more than ~n points.
+function thin(rows, n) {
+  if (rows.length <= n) return rows;
+  const k = Math.ceil(rows.length / n), out = [];
+  for (let i = 0; i < rows.length; i += k) {
+    const b = rows.slice(i, i + k), o = { ts: b[b.length - 1].ts };
+    for (const key in b[0]) if (key !== "ts") o[key] = sum(b.map((x) => x[key])) / b.length;
+    out.push(o);
+  }
+  return out;
+}
+const delta = (b) => (Math.abs(b || 0) < 1048576 ? `<span class="muted">–</span>` :
+  `<span style="color:var(--${b > 0 ? "orange" : "green"})">${b > 0 ? "+" : "−"}${bytes(Math.abs(b))}</span>`);
+function miniSpark(v) {
+  if (!v || v.length < 2) return "";
+  const lo = Math.min(...v), hi = Math.max(...v), r = hi - lo || 1;
+  const pts = v.map((x, i) => `${((i / (v.length - 1)) * 60).toFixed(1)},${(16 - ((x - lo) / r) * 14).toFixed(1)}`).join(" ");
+  return `<svg width="60" height="18" viewBox="0 0 60 18" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="var(--blue)" stroke-width="1.4"/></svg>`;
+}
+const MEM_EV = { critical: ["critical", "critical"], warning: ["warning", "warning"], resolved: ["pass", "ok"], info: ["info", "info"] };
+D.memory = {
+  title: "Memory", live: true,
+  async render() {
+    const m = await memData();
+    if (!m.enabled) return `<div class="g">${panel("Memory watch is off", '<div class="empty">Set <span class="mono">[memory] enabled = true</span> in ~/.config/guardian/config.toml and restart Guardian.</div>', { span: 24, h: 2 })}</div>`;
+    const S = thin(m.samples, 720), t = colOf(S, "ts"), L = m.samples[m.samples.length - 1];
+    if (!L) return `<div class="empty">Collecting the first samples…</div>`;
+    const res = m.resolution, gap = Math.max(res, (t[t.length - 1] - t[0]) / 720) * 6;
+    const usedPct = (100 * L.used) / L.total, availPct = (100 * L.avail) / L.total;
+    const st = m.status || {};
+    const statusChip = { ok: chip("ok", "Healthy"), warning: chip("warning", "Warning"), critical: chip("critical", "Critical") }[st.level] || chip("info", "…");
+    const status = panel("Memory watch", `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:4px 2px">${statusChip}
+        <span style="color:var(--strong)">${esc(st.text)}</span><span style="flex:1"></span>
+        <span class="muted small">system every ${m.settings.sample_seconds}s · processes every ${m.settings.process_seconds}s · ${res === 1 ? "1 s" : res + " s"} resolution in this range</span></div>`,
+      { span: 24, h: "auto", dot: true });
+    const now = status +
+      gauge({ title: "RAM used by apps", value: usedPct, span: 4, h: 2, th: TH.pctSoft, info: "Apps and kernel, excluding cache that can be reclaimed" }) +
+      stat({ title: "Used", value: bytes(L.used), raw: usedPct, th: TH.pctSoft, spark: colOf(S, "used"), span: 4, dot: true, sub: `of ${bytes(L.total)}` }) +
+      stat({ title: "Available", value: bytes(L.avail), raw: 100 - availPct, th: TH.pctSoft, spark: colOf(S, "avail"), span: 4, dot: true, sub: `${pct(availPct, 0)} · free now ${bytes(L.free)}`, info: "Free RAM plus cache the kernel can hand back" }) +
+      stat({ title: "Cache & buffers", value: bytes(L.cache), color: "var(--yellow)", spark: colOf(S, "cache"), span: 4, sub: `dirty ${bytes(L.dirty)} · shared ${bytes(L.shmem)}` }) +
+      stat({ title: "Swap used", value: L.swap_total ? bytes(L.swap_used) : "No swap", raw: L.swap_total ? (100 * L.swap_used) / L.swap_total : 0, th: TH.pctSoft, spark: colOf(S, "swap_used"), span: 4, sub: L.swap_total ? `of ${bytes(L.swap_total)}` : "" }) +
+      stat({ title: "Memory pressure", value: pct(L.psi_some), raw: L.psi_some, th: [[0, "green"], [5, "orange"], [20, "red"]], spark: colOf(S, "psi_some"), span: 4, info: "Share of the last 10 s that programs stalled waiting for RAM (PSI)", sub: `fully blocked ${pct(L.psi_full)}` }) +
+      stat({ title: "RAM in (allocated)", value: bps(L.alloc), color: "var(--blue)", spark: colOf(S, "alloc"), span: 6, small: true, info: "Memory pages the kernel handed out per second" }) +
+      stat({ title: "RAM out (freed)", value: bps(L.freed), color: "var(--purple)", spark: colOf(S, "freed"), span: 6, small: true, info: "Memory pages given back per second" }) +
+      stat({ title: "Page faults", value: num(Math.round(L.faults)), unit: "/s", color: "var(--cyan)", spark: colOf(S, "faults"), span: 6, small: true, sub: `${fix(0)(L.major_faults)}/s had to read from disk` }) +
+      stat({ title: "Disk ↔ RAM", value: bps(L.page_in + L.page_out), color: "var(--green)", spark: S.map((x) => x.page_in + x.page_out), span: 6, small: true, sub: `in ${bps(L.page_in)} · out ${bps(L.page_out)}` });
+
+    const events = (m.events || []).map((e) => {
+      const [c, ch] = MEM_EV[e.level] || MEM_EV.info;
+      return `<div class="ann ${c}"><span class="bar"></span><div class="body"><div class="ttl">${esc(e.message)}</div>
+        <div class="d">${esc(new Date(e.ts * 1000).toLocaleString())} · ${ago(e.ts)}</div></div><div class="tools">${chip(ch, e.level)}</div></div>`;
+    }).join("");
+    const activity = panel("What the watcher noticed", `<div class="scroll">${events || '<div class="empty">Nothing yet. Big processes starting or exiting, sudden jumps, possible leaks and low-memory alerts appear here.</div>'}</div>`,
+      { span: 10, h: 6, right: `${(m.events || []).length} events` }) +
+      timeseries({ title: "What's in RAM", key: "mem-comp", t, gap, stack: true, max: L.total, fmt: bytes, span: 14, h: 6, info: "Stacked: apps & kernel, then cache, then free memory", series: [
+        { name: "apps & kernel", color: "#5794f2", values: colOf(S, "used") }, { name: "cache & buffers", color: "#f2cc0c", values: colOf(S, "cache") },
+        { name: "free", color: "#73bf69", values: colOf(S, "free") }] });
+
+    const flow = timeseries({ title: "RAM in / out", key: "mem-flow", t, gap, fmt: bps, span: 12, info: "Allocated = pages handed to programs, freed = pages given back", series: [
+        { name: "allocated (in)", color: "#5794f2", values: colOf(S, "alloc") }, { name: "freed (out)", color: "#b877d9", values: colOf(S, "freed") }] }) +
+      timeseries({ title: "Disk & swap traffic", key: "mem-io", t, gap, fmt: bps, span: 12, info: "File pages read into RAM or written out, and swap in/out", series: [
+        { name: "read from disk", color: "#73bf69", values: colOf(S, "page_in") }, { name: "written to disk", color: "#ff780a", values: colOf(S, "page_out") },
+        { name: "swap in", color: "#8ab8ff", values: colOf(S, "swap_in") }, { name: "swap out", color: "#f2495c", values: colOf(S, "swap_out") }] }) +
+      timeseries({ title: "Page faults", key: "mem-faults", t, gap, fmt: fix(0), span: 12, info: "Major faults had to read from disk (slow)", series: [
+        { name: "all faults/s", color: "#8ab8ff", values: colOf(S, "faults") }, { name: "major faults/s", color: "#f2495c", values: colOf(S, "major_faults") }] }) +
+      timeseries({ title: "Memory pressure (PSI)", key: "mem-psi", t, gap, fmt: (v) => pct(v, 2), span: 12, series: [
+        { name: "some stalled", color: "#ff780a", values: colOf(S, "psi_some") }, { name: "all stalled", color: "#f2495c", values: colOf(S, "psi_full") }] });
+
+    const maxApp = Math.max(1, ...(m.apps || []).map((a) => a.rss));
+    const apps = panel("Programs (all processes of a program together)", `<div class="scroll"><table class="t"><tr><th>Program</th><th class="n">Procs</th><th class="n">Memory</th><th></th><th class="n">Δ 1 min</th></tr>
+      ${(m.apps || []).map((a) => `<tr><td>${esc(a.name)}</td><td class="n">${a.count}</td><td class="n">${bytes(a.rss)}</td>
+        <td style="width:30%"><div class="pbar" style="height:6px;margin:5px 0 0" title="${pct((100 * a.rss) / L.total)} of RAM"><i style="width:${((100 * a.rss) / maxApp).toFixed(1)}%"></i></div></td>
+        <td class="n">${delta(a.d1m)}</td></tr>`).join("")}</table></div>`, { span: 10, h: 6, right: `${m.count} processes` });
+    const procs = panel("Processes", `<div class="scroll"><table class="t"><tr><th class="n">PID</th><th>Name</th><th class="n">Memory</th><th class="n">Δ 1 min</th><th class="n">Δ 10 min</th><th>Last 10 min</th></tr>
+      ${(m.processes || []).map((p) => `<tr><td class="n muted">${p.pid}</td><td>${esc(p.name)} ${p.leak ? chip("warning", "possible leak") : ""}</td>
+        <td class="n">${bytes(p.rss)}</td><td class="n">${delta(p.d1m)}</td><td class="n">${delta(p.d10m)}</td><td>${miniSpark(p.spark)}</td></tr>`).join("")}</table></div>`, { span: 14, h: 6 });
+
+    return R("mem-now", "Memory now", now) + R("mem-activity", "Activity", activity) + R("mem-flow", "RAM in / out & pressure", flow) +
+      R("mem-procs", "Who uses memory", apps + procs);
+  },
+};
+// ------------------------------------------------------------------ power & thermals
+const TH_TEMP = [[0, "green"], [80, "orange"], [90, "red"]];
+const watts = (w) => (w == null ? "–" : `${Math.abs(w).toFixed(1)} W`);
+const mins = (m) => (m == null ? "" : m >= 90 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min` : `${m} min`);
+D.hardware = {
+  title: "Power & thermals", live: true,
+  async render() {
+    const h = await api("/api/hardware?range=" + state.range);
+    const d = h.snapshot.data || {}, S = h.samples, t = colOf(S, "ts"), gap = h.step * 3.5;
+    if (!h.snapshot.ts) return `<div class="empty">Collecting the first readings…</div>`;
+    const b = (d.batteries || [])[0], thr = d.throttle || {};
+    const hist = S.slice(-240);
+    let power = "";
+    if (b) {
+      const state_ = d.on_battery ? "On battery" : b.status === "Charging" ? "Charging" : "Plugged in";
+      const limit = b.end_threshold == null ? "not supported" : b.end_threshold >= 100 ? "none (100%)" : `${b.start_threshold ? b.start_threshold + "–" : ""}${b.end_threshold}%`;
+      power =
+        stat({ title: "Power source", value: state_, color: d.on_battery ? ((b.percent || 0) < 30 ? "var(--red)" : "var(--orange)") : "var(--green)", span: 4, h: 3, dot: true,
+          sub: d.on_battery ? (b.minutes ? `about ${mins(b.minutes)} left` : "estimating time left…") : b.status === "Charging" && b.minutes ? `full in ${mins(b.minutes)}` : esc(b.status) }) +
+        gauge({ title: "Battery charge", value: b.percent, span: 4, h: 3, th: [[0, "red"], [20, "orange"], [40, "green"]], sub: `${b.energy_wh.toFixed(1)} of ${b.full_wh.toFixed(1)} Wh` }) +
+        gauge({ title: "Battery health", value: b.health, span: 4, h: 3, th: [[0, "red"], [60, "orange"], [80, "green"]], info: "Full charge today compared with the design capacity", sub: `design ${b.design_wh.toFixed(1)} Wh` }) +
+        stat({ title: "Power draw", value: d.on_battery || b.status === "Charging" ? watts(b.watts) : "–", color: "var(--cyan)", span: 4, h: 3, spark: colOf(hist, "bat_watts").map((w) => (w == null ? null : Math.abs(w))),
+          sub: d.on_battery ? "from the battery" : b.status === "Charging" ? "into the battery" : "battery idle, running on the charger" }) +
+        stat({ title: "Charge cycles", value: b.cycles ?? "–", color: "var(--strong)", span: 4, h: 3, sub: `${esc(b.technology || "")} ${esc(b.manufacturer || "")}` }) +
+        stat({ title: "Charge limit", value: limit, color: b.end_threshold != null && b.end_threshold < 100 ? "var(--green)" : "var(--orange)", span: 4, h: 3, small: true,
+          info: "Stopping at ~80% slows battery wear on a laptop that is always plugged in", sub: b.end_threshold >= 100 ? "see Recommendations to set one" : "" });
+    } else power = panel("Battery", '<div class="empty">No battery found: this machine runs from mains power only.</div>', { span: 24, h: 2 });
+
+    const fan = (d.fans || []).length ? Math.max(...d.fans.map((f) => f.rpm)) : null;
+    const nowThr = S.length ? S[S.length - 1].throttle_pct : 0;
+    const thermal =
+      gauge({ title: "CPU temperature", value: d.cpu_temp, fmt: (v) => v.toFixed(0) + " °C", span: 4, h: 3, th: TH_TEMP, info: "CPU package sensor" }) +
+      stat({ title: "Hottest sensor", value: d.temps?.length ? Math.max(...d.temps.map((x) => x.c)).toFixed(0) : "–", unit: "°C", raw: Math.max(0, ...(d.temps || []).map((x) => x.c)), th: TH_TEMP, span: 4, h: 3, spark: colOf(hist, "max_temp"),
+        sub: d.temps?.length ? (() => { const x = d.temps.reduce((a, y) => (y.c > a.c ? y : a)); return esc(`${x.chip} ${x.label}`); })() : "" }) +
+      stat({ title: "Fan", value: fan == null ? "none" : num(fan), unit: fan == null ? "" : "rpm", color: fan === 0 && d.cpu_temp >= 75 ? "var(--red)" : "var(--cyan)", span: 4, h: 3, spark: colOf(hist, "fan_rpm") }) +
+      stat({ title: "Thermal throttling", value: thr.supported ? pct(nowThr, 1) : "n/a", raw: nowThr, th: [[0, "green"], [0.5, "orange"], [5, "red"]], span: 4, h: 3, spark: colOf(hist, "throttle_pct"),
+        info: "Share of time the CPU was slowed down by heat", sub: thr.supported ? `${(thr.ms / 1000).toFixed(0)} s in total since boot` : "not reported by this CPU" }) +
+      stat({ title: "CPU speed", value: d.freq_mhz ? (d.freq_mhz / 1000).toFixed(2) : "–", unit: "GHz", color: "var(--strong)", span: 4, h: 3, spark: colOf(hist, "freq_mhz"), sub: d.freq_max_mhz ? `max ${(d.freq_max_mhz / 1000).toFixed(1)} GHz` : "" }) +
+      stat({ title: "Power profile", value: d.profile || "–", color: "var(--strong)", span: 4, h: 3, small: true, sub: h.busy ? `heavy work paused: ${esc(h.busy)}` : "heavy work allowed" });
+
+    const charts =
+      timeseries({ title: "Temperatures", key: "hw-temp", t, gap, fmt: (v) => (v == null ? "–" : v.toFixed(0) + " °C"), span: 12, series: [
+        { name: "CPU", color: pal(3), values: colOf(S, "cpu_temp") }, { name: "hottest sensor", color: pal(4), values: colOf(S, "max_temp") }] }) +
+      timeseries({ title: "Thermal throttling", key: "hw-thr", t, gap, fmt: (v) => pct(v, 2), span: 12, info: "Share of time the CPU was slowed down by heat", series: [
+        { name: "throttled", color: pal(4), values: colOf(S, "throttle_pct") }] }) +
+      timeseries({ title: "Fan speed", key: "hw-fan", t, gap, fmt: (v) => (v == null ? "–" : num(Math.round(v)) + " rpm"), span: 12, series: [
+        { name: "fan", color: pal(2), values: colOf(S, "fan_rpm") }] }) +
+      timeseries({ title: "CPU speed", key: "hw-freq", t, gap, fmt: (v) => (v == null ? "–" : (v / 1000).toFixed(2) + " GHz"), span: 12, series: [
+        { name: "average of all cores", color: pal(5), values: colOf(S, "freq_mhz") }] }) +
+      (b ? timeseries({ title: "Battery charge", key: "hw-bat", t, gap, fmt: (v) => pct(v, 0), min: 0, max: 100, span: 12, series: [
+        { name: "charge", color: pal(0), values: colOf(S, "bat_pct") }] }) +
+        timeseries({ title: "Battery power", key: "hw-watts", t, gap, fmt: (v) => (v == null ? "–" : (v > 0 ? "+" : "") + v.toFixed(1) + " W"), span: 12, info: "+ charging, − discharging", series: [
+          { name: "battery", color: pal(1), values: colOf(S, "bat_watts") }] }) : "");
+
+    const healthRows = (h.health || []).filter((r) => !b || r.name === b.name);
+    const health = b ? (healthRows.length > 1
+      ? timeseries({ title: "Battery health over time", key: "hw-health", t: colOf(healthRows, "ts"), gap: 86400 * 3, fmt: (v) => pct(v, 1), span: 12, h: 4, series: [
+          { name: "capacity vs design", color: pal(0), values: healthRows.map((r) => (100 * r.full_wh) / r.design_wh) }] })
+      : panel("Battery health over time", '<div class="empty">One reading is saved per day. The trend appears from tomorrow.</div>', { span: 12, h: 4 })) : "";
+    const sensorTable = panel("All sensors", `<div class="scroll"><table class="t"><tr><th>Chip</th><th>Sensor</th><th class="n">Temperature</th><th class="n">Limit</th></tr>
+      ${(d.temps || []).map((x) => `<tr><td class="muted">${esc(x.chip)}</td><td>${esc(x.label)}</td><td class="n" style="color:${thColor(x.c, TH_TEMP)}">${x.c.toFixed(1)} °C</td><td class="n muted">${x.crit ? x.crit.toFixed(0) + " °C" : "–"}</td></tr>`).join("")}
+      ${(d.fans || []).map((f) => `<tr><td class="muted">${esc(f.chip)}</td><td>${esc(f.label)}</td><td class="n">${num(f.rpm)} rpm</td><td></td></tr>`).join("")}</table></div>`, { span: b ? 12 : 24, h: 4 });
+
+    return R("hw-power", "Battery & power", power) + R("hw-thermal", "Temperatures & throttling", thermal) + R("hw-charts", "History", charts) +
+      R("hw-detail", "Details", health + sensorTable);
+  },
+};
+// Tiles are 3 columns wide; how many there are depends on the machine (checks, drives, battery). Widen the
+// tiles on the last, partly filled line so the panels after them start on a fresh line.
+function fillLine(html) {
+  const tiles = html.split(/(?=<div class="p s3 )/).filter(Boolean), per = 8, k = tiles.length % per;
+  if (!k) return html;
+  const w = Math.floor(24 / k);
+  return tiles.map((t, i) => (i >= tiles.length - k ? t.replace('<div class="p s3 ', `<div class="p s${w} `) : t)).join("");
+}
 function procTable(list) {
   return `<table class="t"><tr><th class="n">PID</th><th>Name</th><th>User</th><th class="n">CPU</th><th class="n">Memory</th><th>Command</th></tr>
     ${list.map((x) => `<tr><td class="n">${x.pid}</td><td>${esc(x.name)}</td><td class="muted">${esc(x.user)}</td><td class="n" style="color:${thColor(x.cpu, TH.pct)}">${x.cpu.toFixed(1)}%</td><td class="n">${bytes(x.rss)}</td><td class="mono muted">${esc(x.cmd)}</td></tr>`).join("")}</table>`;
@@ -745,7 +928,7 @@ document.addEventListener("click", async (e) => {
 
 // Suggested fixes that are shell commands get a copy button; advice is shown as text.
 const shortImage = (i) => String(i).split("@")[0].split("/").pop();
-const isCommand = (t) => /^(sudo |cd |chmod |chown |echo |docker |systemctl |apt |ufw )/.test(t);
+const isCommand = (t) => /^(sudo |cd |chmod |chown |echo |docker |systemctl |apt |ufw |printf )/.test(t);
 D.security = {
   title: "Security & vulnerabilities", live: false,
   vars: () => ({ show: { label: "show", options: ["problems", "all", "passed"] } }),
@@ -856,6 +1039,12 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+// Suggestion text with any shell commands pulled out into one copyable block.
+function suggestion(text) {
+  const lines = String(text).split("\n"), cmds = lines.filter(isCommand), words = lines.filter((l) => !isCommand(l)).join(" ");
+  return `<div class="d"><b>Suggestion:</b> ${esc(words)}</div>` +
+    (cmds.length ? `<div class="fix"><code class="${cmds.length > 1 ? "multi" : ""}">${esc(cmds.join("\n"))}</code><button class="btn sm" data-copy="${esc(cmds.join("\n"))}">Copy</button></div>` : "");
+}
 D.alerts = {
   title: "Recommendations", live: true,
   async render() {
@@ -865,7 +1054,7 @@ D.alerts = {
       stat({ title: "Warning", value: c("warning"), raw: c("warning"), th: [[0, "green"], [1, "orange"]], span: 8, h: 1 }) +
       stat({ title: "Info", value: c("info"), color: "var(--cyan)", span: 8, h: 1 });
     const list = recs.map((r) => `<div class="ann ${esc(r.severity)}"><span class="bar"></span><div class="body"><div class="ttl">${esc(r.title)}</div>
-      <div class="d">${esc(r.detail)}</div>${r.suggestion ? `<div class="d"><b>Suggestion:</b> ${esc(r.suggestion)}</div>` : ""}
+      <div class="d">${esc(r.detail)}</div>${r.suggestion ? suggestion(r.suggestion) : ""}
       <details><summary>Evidence · confidence ${esc(r.confidence)} · since ${ago(r.first_seen)}</summary><pre class="log">${esc(JSON.stringify(r.evidence, null, 2))}</pre></details></div>
       <div class="tools">${chip(r.severity, r.severity)} ${chip("blue", r.category)} ${recTool(r.action)} <button class="btn sm" data-dismiss="${esc(r.id)}">Dismiss</button></div></div>`).join("") || '<div class="empty">No recommendations. All clear.</div>';
     return R("al-top", "Summary", top) + R("al-list", "Active recommendations", panel("Generated from collected evidence every 5 minutes. Nothing is applied automatically.", `<div class="scroll">${list}</div>`, { span: 24, h: 6 }));
@@ -953,7 +1142,9 @@ document.addEventListener("input", (e) => {
 });
 
 // ------------------------------------------------------------------ router & refresh
-let timer = null, busy = false, again = false;
+let timer = null, busy = false, again = false, mouse = null;
+document.addEventListener("mousemove", (e) => { mouse = { x: e.clientX, y: e.clientY }; }, { passive: true });
+document.addEventListener("mouseleave", () => { mouse = null; });
 const where = () => { const [, page = "server", arg] = (location.hash || "#/server").split("/"); return { page: D[page] ? page : "server", arg }; };
 async function render(showDot) {
   // One render at a time; a request that arrives meanwhile runs right after (never dropped).
@@ -972,7 +1163,14 @@ async function render(showDot) {
     const html = await dash.render(arg);
     const now = where();
     if (now.page !== page || now.arg !== arg) again = true;   // user navigated meanwhile: discard
-    else if (!dlg.open) $("#main").innerHTML = html;
+    else if (!dlg.open) {
+      const same = state.shown === page + "/" + arg;
+      const scrolls = same ? [...document.querySelectorAll("#main .scroll")].map((el) => el.scrollTop) : [];
+      $("#main").innerHTML = html;
+      state.shown = page + "/" + arg;
+      document.querySelectorAll("#main .scroll").forEach((el, i) => { if (scrolls[i]) el.scrollTop = scrolls[i]; });
+      if (mouse) document.elementFromPoint(mouse.x, mouse.y)?.dispatchEvent(new MouseEvent("mousemove", { clientX: mouse.x, clientY: mouse.y, bubbles: true }));
+    }
     // Container names are only known after the first Docker render: refresh the selector once.
     const sel = $("#var-container");
     if (page === "docker" && sel && sel.options.length !== (state.containerNames || []).length + 1) renderVars(dash);
@@ -988,7 +1186,7 @@ function schedule() {
   const { page, arg } = where();
   // Live dashboards refresh on the chosen interval; forms and detail pages only while a scan runs.
   const live = (D[page].live && !arg) || (page === "duplicates" && !arg && state.dupRunning) || (page === "security" && state.secBusy);
-  const every = page === "duplicates" || page === "security" ? 3 : state.every;
+  const every = page === "duplicates" || page === "security" ? 3 : page === "memory" && state.every > 0 ? 2 : state.every;
   if (every > 0 && live) timer = setTimeout(() => { if (document.visibilityState === "visible") render(true); else schedule(); }, every * 1000);
 }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && state.every > 0 && D[where().page].live) render(true); });

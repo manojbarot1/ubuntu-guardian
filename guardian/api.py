@@ -18,6 +18,7 @@ from . import intel, security, services_kb
 from .util import read
 
 STATIC = Path(__file__).parent / "static"
+MEM_RANGES = {"5m": 300, "15m": 900, "1h": 3600, "6h": 6 * 3600, "24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400}
 RANGES = {"1h": 3600, "6h": 6 * 3600, "24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400, "1y": 365 * 86400}
 PUBLIC = {"/login", "/api/login", "/api/health", "/static/style.css", "/static/login.js", "/static/theme.js",
           "/static/logo.svg", "/favicon.ico"}
@@ -174,6 +175,34 @@ def create_app(ctx) -> FastAPI:
     @app.get("/api/processes")
     def processes():
         return snap("processes")
+
+    @app.get("/api/hardware")
+    def hardware_view(range: str = "24h"):
+        secs = MEM_RANGES.get(range, 86400)
+        now = int(time.time())
+        since, step = now - secs, max(15, secs // 400)
+        cols = ["cpu_temp", "max_temp", "fan_rpm", "bat_pct", "bat_watts", "on_battery", "throttle_pct", "freq_mhz"]
+        if secs <= 2 * 86400:
+            samples = bucketed("hw_samples", cols, since, step)
+        else:   # hourly roll-ups for older data, raw samples for the part not rolled up yet
+            cut = now - 2 * 86400
+            samples = [r for r in bucketed("hw_hourly", cols, since, max(step, 3600)) if r["ts"] < cut] \
+                + bucketed("hw_samples", cols, cut, step)
+        return fast_json({"range": range, "step": step, "snapshot": snap("hardware"), "samples": samples,
+                          "health": db.all("SELECT * FROM battery_health ORDER BY ts"), "busy": ctx.gov.reason})
+
+    @app.get("/api/memory")
+    def memory(range: str = "15m", since: float = 0, events_after: int = 0):
+        """Memory dashboard. With `since`, only samples newer than it (the live page polls every few seconds)."""
+        mw = ctx.memwatch
+        if not mw:
+            return {"enabled": False}
+        secs = MEM_RANGES.get(range, 900)
+        ev = db.all("SELECT * FROM mem_events WHERE id > ? AND ts > ? ORDER BY id DESC LIMIT 200",
+                    (events_after, time.time() - max(secs, 86400)))
+        return fast_json({"enabled": True, "range": range, "seconds": secs, "resolution": 1 if secs <= 3600 else max(10, secs // 1000),
+                          "samples": mw.history(secs, since), "events": ev, **mw.top(),
+                          "settings": {k: cfg["memory"][k] for k in ("sample_seconds", "process_seconds", "history_days")}})
 
     @app.get("/api/services")
     def services():
@@ -392,7 +421,7 @@ def create_app(ctx) -> FastAPI:
         return {"config": safe, "config_file": str(C.CONFIG_FILE), "executor": A.executor_available(),
                 "executor_install": C.EXECUTOR_INSTALL, "install_dir": str(C.INSTALL_DIR),
                 "initial_password_file_exists": (C.CONFIG_DIR / "initial-password.txt").exists(),
-                "scheduler": ctx.scheduler.status()}
+                "scheduler": ctx.scheduler.status() + ([ctx.memwatch.stats()] if ctx.memwatch else [])}
 
     # ------------------------------------------------------------------ pages
     app.mount("/static", StaticFiles(directory=STATIC), name="static")

@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 
 from . import config as C
+from . import hardware as HW
 from . import services_kb
 from .util import human_bytes
 
@@ -146,6 +147,65 @@ def evaluate(db, cfg) -> list[dict]:
     if h.get("pio") and h["pio"] > 20:
         out.append(rec("io-pressure", "warning", "performance", "Disk I/O is a bottleneck",
                        f"I/O pressure averaged {h['pio']:.1f}% over the last hour.", h))
+    # ---------------- battery, power and thermals
+    hw = snap("hardware")
+    for b in hw.get("batteries", []):
+        ev = {k: b.get(k) for k in ("name", "status", "percent", "health", "full_wh", "design_wh", "cycles", "end_threshold")}
+        if hw.get("on_battery"):
+            left = f"; about {b['minutes']} min left at the current draw" if b.get("minutes") else ""
+            out.append(rec("power-on-battery", "critical" if (b.get("percent") or 0) < 30 else "warning", "hardware",
+                           f"Running on battery ({b.get('percent')}%)",
+                           f"The charger is unplugged or not delivering power{left}. When the battery runs out the "
+                           "server switches off without a clean shutdown.", ev,
+                           suggestion="Plug the charger back in. Guardian pauses its heavy work while on battery."))
+        if b.get("health") is not None and b["health"] < 85:
+            cyc = f" after {b['cycles']} charge cycles" if b.get("cycles") else ""
+            out.append(rec(f"battery-health-{b['name']}", "warning" if b["health"] < 70 else "info", "hardware",
+                           f"Battery holds {b['health']:.0f}% of its original capacity",
+                           f"{b['full_wh']:.1f} of {b['design_wh']:.1f} Wh{cyc}. It covers shorter power cuts as it wears.", ev,
+                           suggestion="Nothing urgent. Replace the battery if it drops below about 60%, or if the server "
+                                      "must ride out long power cuts."))
+        plugged = db.one("SELECT AVG(on_battery) AS ob, COUNT(*) AS n FROM hw_samples WHERE ts > ?", (now - 86400,))
+        if b.get("end_threshold") == 100 and b.get("end_threshold_file") and plugged and plugged["n"] > 20 and (plugged["ob"] or 0) < 0.05:
+            out.append(rec(f"battery-limit-{b['name']}", "info", "hardware", "Limit battery charging to 80%",
+                           "This laptop is plugged in almost all the time. A lithium battery held at 100% wears fastest; "
+                           "stopping at 80% (and resuming below 75%) slows the wear and still leaves enough for a power cut.", ev,
+                           suggestion="Run these commands (the last one keeps the limit after a reboot):\n" + HW.threshold_commands(b)))
+    th = db.one("SELECT AVG(throttle_pct) AS thr, COUNT(*) AS n FROM hw_samples WHERE ts > ?", (now - 3600,))
+    hot = db.one("SELECT AVG(cpu_temp) AS t FROM hw_samples WHERE ts > ?", (now - 900,))
+    cool_tip = ("Clean the vents, raise the laptop on a stand, and see which processes use CPU on the Server page. "
+                "Immich face detection and video transcoding are the usual causes.")
+    if th and th["n"] > 20 and (th["thr"] or 0) >= 1:
+        out.append(rec("cpu-throttling", "warning", "hardware",
+                       f"CPU slowed down by heat for {th['thr'] * 36:.0f} s in the last hour",
+                       "When the CPU gets too hot it lowers its speed, which makes Immich jobs and the web UI slower.", th,
+                       suggestion=cool_tip))
+    cpu_t = hw.get("cpu_temp")
+    crit = next((t["crit"] for t in hw.get("temps", []) if t.get("crit") and t["c"] == cpu_t), None) or 100
+    if cpu_t and cpu_t >= crit - 5:
+        out.append(rec("cpu-temp-critical", "critical", "hardware", f"CPU is at {cpu_t:.0f} °C, near its shutdown limit",
+                       f"The hardware switches off at about {crit:.0f} °C.", {"cpu_temp": cpu_t, "crit": crit}, suggestion=cool_tip))
+    elif hot and hot["t"] and hot["t"] >= 85:
+        out.append(rec("cpu-hot", "warning", "hardware", f"CPU averaged {hot['t']:.0f} °C over the last 15 minutes",
+                       "Sustained heat shortens hardware life and leads to throttling.", hot, suggestion=cool_tip))
+    if hw.get("fans") and cpu_t and cpu_t >= 75 and max(f["rpm"] for f in hw["fans"]) == 0:
+        out.append(rec("fan-stopped", "warning", "hardware", f"Fan is not spinning while the CPU is at {cpu_t:.0f} °C",
+                       "The fan may be blocked, broken or left in a manual mode.", {"fans": hw["fans"], "cpu_temp": cpu_t},
+                       suggestion="Listen for the fan and check the vents. On ThinkPads, make sure the fan level is 'auto'."))
+
+    # Possible leaks and OOM kills seen by the memory watch (Memory dashboard).
+    for lk in db.all("SELECT pid, name, MAX(delta) AS growth, MAX(ts) AS ts FROM mem_events WHERE kind='leak' AND ts > ? "
+                     "GROUP BY pid, name", (now - 3 * 3600,)):
+        if os.path.exists(f"/proc/{lk['pid']}"):
+            out.append(rec(f"mem-leak-{lk['name']}", "warning", "performance", f"{lk['name']} may be leaking memory",
+                           f"Process {lk['pid']} grew steadily by {human_bytes(lk['growth'] or 0)} in 10 minutes. "
+                           "Growth that never levels off usually means a leak.", lk, confidence="medium",
+                           suggestion="Watch it on the Memory dashboard. Restarting the program releases the memory."))
+    oom = db.one("SELECT COUNT(*) AS n, MAX(ts) AS ts FROM mem_events WHERE kind='oom' AND ts > ?", (now - 86400,))
+    if oom and oom["n"]:
+        out.append(rec("mem-oom", "critical", "performance", "The system ran out of memory",
+                       f"The kernel had to kill processes to free RAM {oom['n']} time(s) in the last 24 hours.", oom,
+                       suggestion="Check the Memory dashboard for what grew before it happened."))
     sw = live.get("swap", {})
     if sw.get("total") and sw.get("percent", 0) > 50 and (live.get("psi", {}).get("memory") or 0) > 1:
         out.append(rec("swap-heavy", "warning", "performance", f"Swap is {sw['percent']:.0f}% used under memory pressure",
