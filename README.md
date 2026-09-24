@@ -60,13 +60,21 @@ It is designed to **never become the problem it watches for**: about 0.5% of one
 
 ## Screenshots
 
-| Security & vulnerabilities | Docker containers |
+| Memory (live) | Power & thermals |
 |---|---|
+| ![Memory](docs/screenshots/memory.png) | ![Power & thermals](docs/screenshots/power.png) |
+| **Security & vulnerabilities** | **Docker containers** |
 | ![Security](docs/screenshots/security.png) | ![Docker](docs/screenshots/docker.png) |
 | **Immich** | **Storage & drive health** |
 | ![Immich](docs/screenshots/immich.png) | ![Storage](docs/screenshots/storage.png) |
-| **Services** | **Phone layout** |
-| ![Services](docs/screenshots/services.png) | <img src="docs/screenshots/mobile.png" width="260" alt="Mobile view"> |
+| **Services** | **Network** |
+| ![Services](docs/screenshots/services.png) | ![Network](docs/screenshots/network.png) |
+| **Recommendations** | **Duplicate files** |
+| ![Recommendations](docs/screenshots/recommendations.png) | ![Duplicate files](docs/screenshots/duplicates.png) |
+| **Audit log** | **Settings** |
+| ![Audit log](docs/screenshots/audit.png) | ![Settings](docs/screenshots/settings.png) |
+| **Phone layout** | |
+| <img src="docs/screenshots/mobile.png" width="260" alt="Mobile view"> | |
 
 ## Requirements
 

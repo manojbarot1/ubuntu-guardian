@@ -570,7 +570,8 @@ D.hardware = {
       stat({ title: "Power profile", value: d.profile || "–", color: "var(--strong)", span: 4, h: 3, small: true, sub: h.busy ? `heavy work paused: ${esc(h.busy)}` : "heavy work allowed" });
 
     const charts =
-      timeseries({ title: "Temperatures", key: "hw-temp", t, gap, fmt: (v) => (v == null ? "–" : v.toFixed(0) + " °C"), span: 12, series: [
+      timeseries({ title: "Temperatures", key: "hw-temp", t, gap, fmt: (v) => (v == null ? "–" : v.toFixed(0) + " °C"), span: 12,
+        max: Math.max(0, ...colOf(S, "max_temp").filter((v) => v != null)) > 100 ? 120 : 100, series: [
         { name: "CPU", color: pal(3), values: colOf(S, "cpu_temp") }, { name: "hottest sensor", color: pal(4), values: colOf(S, "max_temp") }] }) +
       timeseries({ title: "Thermal throttling", key: "hw-thr", t, gap, fmt: (v) => pct(v, 2), span: 12, info: "Share of time the CPU was slowed down by heat", series: [
         { name: "throttled", color: pal(4), values: colOf(S, "throttle_pct") }] }) +
@@ -1094,7 +1095,7 @@ D.settings = {
       <p class="muted">Protected anywhere: ${esc(c.protection.protected_patterns.join(", "))}</p><p class="muted">Protected services: <span class="mono">${esc(c.protection.protected_units.join(", "))}</span></p>
       <p class="muted">Edit <span class="mono">${esc(s.config_file)}</span>, then <span class="mono">systemctl --user restart guardian</span>.</p>`, { span: 16, h: "auto" });
     const load = panel("Load protection", `<div class="kv">
-      <div>Busy when</div><div>load &gt; ${c.governor.busy_load_per_cpu}/CPU, CPU &gt; ${c.governor.busy_cpu_percent}%, RAM free &lt; ${c.governor.busy_mem_available_percent}%, I/O pressure &gt; ${c.governor.busy_io_pressure}%, or Immich processing</div>
+      <div>Busy when</div><div>load &gt; ${c.governor.busy_load_per_cpu}/CPU, CPU &gt; ${c.governor.busy_cpu_percent}%, RAM free &lt; ${c.governor.busy_mem_available_percent}%, I/O pressure &gt; ${c.governor.busy_io_pressure}%, Immich processing${c.governor.busy_on_battery ? ", on battery" : ""}, or CPU ≥ ${c.governor.busy_cpu_temp} °C</div>
       <div>While busy</div><div>heavy checks wait (up to ${c.governor.max_defer}× their interval); duplicate scans pause</div>
       <div>Hard limits</div><div>systemd CPUQuota 25%, MemoryMax 400 MB, idle I/O class, nice 10</div>
       <div>Scan read rate</div><div>${c.duplicates.read_rate_mb_s} MB/s</div>
